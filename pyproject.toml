@@ -1,0 +1,51 @@
+[project]
+name = "chemterm"
+version = "0.1.0"
+description = "Evidence-first multilingual chemical terminology infrastructure"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.16,<2",
+    "httpx>=0.28,<1",
+    "pgvector>=0.4,<1",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.10,<3",
+    "sqlalchemy>=2.0,<3",
+]
+
+[project.scripts]
+chemterm-extract = "chemterm.extract_cli:main"
+
+[project.optional-dependencies]
+ner = [
+    "torch>=2.7,<3",
+    "transformers>=4.53,<6",
+]
+embeddings = [
+    "sentence-transformers>=5,<6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<9",
+    "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chemterm"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

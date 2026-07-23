@@ -1,0 +1,10 @@
+.env
+.venv/
+.venv-wsl/
+__pycache__/
+*.pyc
+.python-version
+.cache/
+reports/
+
+/data/
