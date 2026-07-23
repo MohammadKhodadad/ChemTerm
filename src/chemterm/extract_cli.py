@@ -19,7 +19,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="Multilingual patent-title CSV")
     parser.add_argument("--output", type=Path, help="Output JSONL; defaults to stdout")
-    parser.add_argument("--ner-model", help="Optional Hugging Face token-classification model")
+    parser.add_argument(
+        "--ner-model",
+        action="append",
+        default=[],
+        help="Additional Hugging Face token-classification model; repeatable",
+    )
+    parser.add_argument(
+        "--chemu",
+        action="store_true",
+        help="Enable mpkato/chemu-biobert-ner for patent reaction entities",
+    )
+    parser.add_argument(
+        "--cde-python",
+        type=Path,
+        help="Python 3.11 executable from an environment containing chemdataextractor2",
+    )
+    parser.add_argument(
+        "--cde-worker",
+        type=Path,
+        default=Path("scripts/cde_ner_worker.py"),
+        help="ChemDataExtractor JSON-lines worker script",
+    )
     parser.add_argument(
         "--llm",
         action="store_true",
@@ -39,7 +60,15 @@ def main() -> int:
 
     args = build_parser().parse_args()
     adapter = CsvTitleAdapter(args.input)
-    pipeline = build_english_pipeline(ner_model=args.ner_model, use_llm=args.llm)
+    cde_command = (
+        (str(args.cde_python), str(args.cde_worker)) if args.cde_python is not None else None
+    )
+    pipeline = build_english_pipeline(
+        ner_models=args.ner_model,
+        use_chemu=args.chemu,
+        cde_command=cde_command,
+        use_llm=args.llm,
+    )
     pairing_pipeline = build_llm_pairing_pipeline() if args.pair_languages else None
 
     output_context = (

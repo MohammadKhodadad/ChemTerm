@@ -721,10 +721,10 @@ Exit gate: equivalent formatting receives the same search key without collapsing
 
 ### Step 5: English candidate extraction baseline
 
-Status: core baseline implemented; external NER selection and benchmarking remain pending.
+Status: combined baseline implemented; model benchmarking remains pending.
 
-- evaluate ChemDataExtractor or a compatible broad chemical NER model;
-- evaluate a ChEMU model for reaction-oriented text;
+- integrate ChemDataExtractor 2 as the broad chemical-mention recognizer;
+- integrate ChEMU BioBERT for reaction-oriented patent text;
 - add formula, identifier, abbreviation, quantity, and patent-label rules;
 - add scientific noun-phrase and multi-word terminology extraction;
 - preserve nested candidates and extractor provenance;
@@ -733,15 +733,22 @@ Status: core baseline implemented; external NER selection and benchmarking remai
 Implemented components:
 
 - typed candidate, role, issue, and extraction-result contracts;
-- deterministic formula, identifier, quantity, abbreviation, and patent-label rules;
+- deterministic formula, InChI, InChIKey, CAS RN, SMILES, pH, quantity/range,
+  abbreviation, and patent-label rules;
 - transparent nested technical-phrase extraction;
-- lazy Hugging Face token-classification adapter with ChEMU label mapping;
+- lazy first-class ChEMU adapter with controlled type and reaction-role mapping;
+- persistent JSON-lines ChemDataExtractor worker isolated under Python 3.11;
 - exact source-span validation and original-offset projection;
-- replaceable extractor/refiner protocols and a JSONL CLI.
+- replaceable extractor/refiner protocols and a JSONL CLI;
+- controlled LLM taxonomy typing in place of an unavailable production-ready
+  fine-grained "ChemNER" checkpoint.
 
 Exit gate: each English text unit produces exact-span candidates with source methods and provisional types.
 
 ### Step 6: Candidate reconciliation and relevance
+
+Status: exact-span evidence reconciliation implemented; boundary conflict handling,
+boilerplate filtering, and calibrated relevance scoring remain pending.
 
 - merge identical spans while preserving all evidence;
 - retain meaningful nested terms;
@@ -750,6 +757,15 @@ Exit gate: each English text unit produces exact-span candidates with source met
 - classify candidates into concept types and term forms;
 - compute transparent score components;
 - abstain when a candidate is ambiguous.
+
+Implemented components:
+
+- deterministic exact-span grouping before LLM refinement;
+- union and hierarchy reduction of provisional types;
+- preservation of extractor names, raw labels, roles, and component confidences;
+- conservative review flags for incompatible top-level type evidence;
+- independent preservation of repeated mentions and meaningful nested spans;
+- fail-open issue reporting if reconciliation itself fails.
 
 Exit gate: the pipeline yields a stable, reviewable English candidate list rather than raw model output.
 

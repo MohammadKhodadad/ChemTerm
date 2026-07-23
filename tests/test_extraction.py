@@ -2,10 +2,13 @@
 
 from typing import Any
 
-from chemterm.contracts.extraction import CandidateType
+from chemterm.contracts.extraction import CandidateType, ContextRole, RawCandidate
 from chemterm.contracts.input import PatentInput, TextUnit, TextUnitType
 from chemterm.extraction import (
+    ChemDataExtractorNerExtractor,
+    ChemUNerExtractor,
     DeterministicRuleExtractor,
+    ExactSpanCandidateReconciler,
     TechnicalPhraseExtractor,
     TransformersNerExtractor,
 )
@@ -80,6 +83,19 @@ def test_deterministic_rules_find_formula_quantity_and_label() -> None:
     }
 
 
+def test_deterministic_rules_cover_identifiers_conditions_and_ranges() -> None:
+    text = "CAS 64-17-5; SMILES: CCO; pH 7.4; heated at 20-25 °C and 5 wt.% solids."
+
+    candidates = DeterministicRuleExtractor().extract(text)
+    extracted = {(item.text, item.raw_label) for item in candidates}
+
+    assert ("64-17-5", "CAS_RN") in extracted
+    assert ("CCO", "SMILES") in extracted
+    assert ("pH 7.4", "PH") in extracted
+    assert ("20-25 °C", "QUANTITY") in extracted
+    assert ("5 wt.%", "QUANTITY") in extracted
+
+
 def test_phrase_extractor_finds_nested_patent_terminology() -> None:
     text = "Low solvent coating process for a gold alloy"
 
@@ -115,6 +131,70 @@ def test_transformers_adapter_is_lazy_and_uses_exact_model_offsets() -> None:
 
     assert candidates[0].text == "Gold"
     assert candidates[0].types == (CandidateType.CHEMICAL_ENTITY,)
+
+
+def test_chemu_adapter_maps_reaction_labels_and_roles() -> None:
+    def factory(*args: Any, **kwargs: Any) -> Any:
+        def model(text: str) -> list[dict[str, Any]]:
+            return [
+                {
+                    "start": 0,
+                    "end": 7,
+                    "entity_group": "SOLVENT",
+                    "score": 0.96,
+                }
+            ]
+
+        return model
+
+    candidate = ChemUNerExtractor(pipeline_factory=factory).extract("ethanol was added")[0]
+
+    assert candidate.types == (CandidateType.CHEMICAL_ENTITY,)
+    assert candidate.roles == (ContextRole.SOLVENT,)
+    assert candidate.extractor == "chemu_ner"
+
+
+def test_chemdataextractor_adapter_preserves_worker_spans() -> None:
+    extractor = ChemDataExtractorNerExtractor(
+        request=lambda text: [{"text": "NaCl", "start": 0, "end": 4, "confidence": 0.91}]
+    )
+
+    candidate = extractor.extract("NaCl solution")[0]
+
+    assert candidate.text == "NaCl"
+    assert candidate.extractor == "chemdataextractor_ner"
+    assert candidate.types == (CandidateType.CHEMICAL_ENTITY,)
+
+
+def test_reconciler_merges_exact_evidence_and_prefers_child_type() -> None:
+    candidates = (
+        RawCandidate(
+            text="ethanol",
+            start=0,
+            end=7,
+            types=(CandidateType.CHEMICAL_ENTITY,),
+            confidence=0.9,
+            extractor="cde",
+            extractor_version="1",
+        ),
+        RawCandidate(
+            text="ethanol",
+            start=0,
+            end=7,
+            types=(CandidateType.COMPOUND,),
+            roles=(ContextRole.SOLVENT,),
+            confidence=0.95,
+            extractor="chemu",
+            extractor_version="1",
+        ),
+    )
+
+    result = ExactSpanCandidateReconciler().reconcile("ethanol", candidates)
+
+    assert len(result) == 1
+    assert result[0].types == (CandidateType.COMPOUND,)
+    assert result[0].roles == (ContextRole.SOLVENT,)
+    assert result[0].metadata["extractors"] == ["cde", "chemu"]
 
 
 def test_pipeline_runs_baseline_and_llm_refinement() -> None:
@@ -238,9 +318,9 @@ def test_llm_refiner_mechanically_removes_out_of_scope_decisions() -> None:
         ),
     )
     multilingual_result = pipeline.extract(multilingual_record)
-    pairing = MultilingualPairingPipeline(
-        LlmParallelTextMapper(RoutingFakeLlmClient({}))
-    ).pair(multilingual_record, multilingual_result)
+    pairing = MultilingualPairingPipeline(LlmParallelTextMapper(RoutingFakeLlmClient({}))).pair(
+        multilingual_record, multilingual_result
+    )
     assert pairing.mappings == ()
     assert pairing.issues == ()
 

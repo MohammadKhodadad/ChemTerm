@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from chemterm.config import get_settings
 from chemterm.contracts.extraction import (
@@ -13,9 +13,14 @@ from chemterm.contracts.extraction import (
 )
 from chemterm.contracts.input import PatentInput
 from chemterm.extraction import (
+    CHEMU_MODEL,
     CandidateExtractor,
+    CandidateReconciler,
     CandidateRefiner,
+    ChemDataExtractorNerExtractor,
+    ChemUNerExtractor,
     DeterministicRuleExtractor,
+    ExactSpanCandidateReconciler,
     TechnicalPhraseExtractor,
     TransformersNerExtractor,
 )
@@ -31,9 +36,11 @@ class EnglishExtractionPipeline:
         *,
         extractors: Iterable[CandidateExtractor],
         refiners: Iterable[CandidateRefiner] = (),
+        reconciler: CandidateReconciler | None = None,
     ) -> None:
         self.extractors = tuple(extractors)
         self.refiners = tuple(refiners)
+        self.reconciler = reconciler or ExactSpanCandidateReconciler()
         if not self.extractors:
             raise ValueError("at least one candidate extractor is required")
 
@@ -68,7 +75,7 @@ class EnglishExtractionPipeline:
 
                 for prediction in predictions:
                     try:
-                        candidate = self._ground_candidate(
+                        self._ground_candidate(
                             record,
                             unit_index,
                             unit.language,
@@ -87,9 +94,34 @@ class EnglishExtractionPipeline:
                         )
                         continue
                     valid_raw.append(prediction)
-                    baseline.append(candidate)
 
-            baseline_for_unit = tuple(valid_raw)
+            try:
+                baseline_for_unit = self.reconciler.reconcile(
+                    normalized.normalized_text,
+                    tuple(valid_raw),
+                )
+            except Exception as error:
+                issues.append(
+                    self._issue(
+                        record,
+                        unit_index,
+                        self.reconciler.name,
+                        "RECONCILER_FAILED",
+                        str(error),
+                    )
+                )
+                baseline_for_unit = tuple(valid_raw)
+
+            baseline.extend(
+                self._ground_candidate(
+                    record,
+                    unit_index,
+                    unit.language,
+                    normalized,
+                    prediction,
+                )
+                for prediction in baseline_for_unit
+            )
             for refiner in self.refiners:
                 try:
                     predictions = refiner.refine(
@@ -207,6 +239,9 @@ class EnglishExtractionPipeline:
 def build_english_pipeline(
     *,
     ner_model: str | None = None,
+    ner_models: Iterable[str] = (),
+    use_chemu: bool = False,
+    cde_command: Sequence[str] | None = None,
     use_llm: bool = False,
 ) -> EnglishExtractionPipeline:
     """Build the default baseline with optional NER and LLM components."""
@@ -215,8 +250,17 @@ def build_english_pipeline(
         DeterministicRuleExtractor(),
         TechnicalPhraseExtractor(),
     ]
+    configured_models = list(ner_models)
     if ner_model:
-        extractors.append(TransformersNerExtractor(ner_model))
+        configured_models.append(ner_model)
+    for model_name in dict.fromkeys(configured_models):
+        if use_chemu and model_name == CHEMU_MODEL:
+            continue
+        extractors.append(TransformersNerExtractor(model_name))
+    if use_chemu:
+        extractors.append(ChemUNerExtractor())
+    if cde_command:
+        extractors.append(ChemDataExtractorNerExtractor(cde_command))
 
     refiners: list[CandidateRefiner] = []
     if use_llm:

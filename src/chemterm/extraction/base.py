@@ -33,3 +33,19 @@ class CandidateRefiner(Protocol):
         """Return refined candidates grounded in the same text."""
 
         ...
+
+
+class CandidateReconciler(Protocol):
+    """Merge evidence from independent candidate generators."""
+
+    name: str
+    version: str
+
+    def reconcile(
+        self,
+        text: str,
+        candidates: tuple[RawCandidate, ...],
+    ) -> tuple[RawCandidate, ...]:
+        """Return one deterministic pre-refinement candidate set."""
+
+        ...

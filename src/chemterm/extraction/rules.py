@@ -20,11 +20,17 @@ _FORMULA = re.compile(r"\b(?:[A-Z][a-z]?[0-9]*){2,}\b")
 _FORMULA_TOKEN = re.compile(r"([A-Z][a-z]?)([0-9]*)")
 _INCHI = re.compile(r"\bInChI=[^\s,;]+")
 _INCHI_KEY = re.compile(r"\b[A-Z]{14}-[A-Z]{10}-[A-Z]\b")
+_CAS_RN = re.compile(r"\b[1-9][0-9]{1,6}-[0-9]{2}-[0-9]\b")
+_SMILES = re.compile(r"(?i:\bSMILES\s*[:=]\s*)(?P<value>[^\s,;]+)")
 _QUANTITY = re.compile(
-    r"\b\d+(?:\.\d+)?\s?(?:°C|K|%|mol|mmol|μmol|g|kg|mg|μg|mL|μL|L|Pa|kPa|bar)\b"
+    r"(?<![\w.])(?:\d+(?:\.\d+)?\s*(?:-|–|to)\s*)?\d+(?:\.\d+)?\s*"
+    r"(?:°C|°F|K|wt\.?%|vol\.?%|mol%|%|ppm|ppb|mol|mmol|μmol|µmol|"
+    r"kg|mg|μg|µg|g|mL|μL|µL|L|MPa|kPa|Pa|mbar|bar|M|mM|μM|µM|"
+    r"nm|μm|µm|mm|cm|mPa[·.]s)(?=$|[\s,;.)])"
 )
+_PH = re.compile(r"\bpH(?:\s*(?:of|=|:))?\s*\d+(?:\.\d+)?(?:\s*(?:-|–|to)\s*\d+(?:\.\d+)?)?")
 _PATENT_LABEL = re.compile(
-    r"\b(?:Compound|Intermediate|Example)\s+[A-Z]?[0-9]+[A-Za-z]?\b",
+    r"\b(?:Compound|Intermediate|Example|Preparation)\s+[A-Z]?[0-9]+[A-Za-z]?\b",
     re.IGNORECASE,
 )
 _ABBREVIATION = re.compile(r"\((?P<abbr>[A-Z][A-Z0-9-]{1,10})\)")
@@ -54,11 +60,20 @@ class DeterministicRuleExtractor:
                 "INCHI",
                 0.99,
             ),
+            *self._cas_numbers(text),
+            *self._smiles(text),
             *self._matches(
                 text,
                 _QUANTITY,
                 CandidateType.MEASUREMENT,
                 "QUANTITY",
+                0.98,
+            ),
+            *self._matches(
+                text,
+                _PH,
+                CandidateType.MEASUREMENT,
+                "PH",
                 0.98,
             ),
             *self._matches(
@@ -74,6 +89,44 @@ class DeterministicRuleExtractor:
         return tuple(
             sorted(candidates, key=lambda item: (item.start, item.end, item.raw_label or ""))
         )
+
+    def _cas_numbers(self, text: str) -> Iterator[RawCandidate]:
+        for match in _CAS_RN.finditer(text):
+            value = match.group(0)
+            digits = value.replace("-", "")
+            checksum = (
+                sum(
+                    int(digit) * weight
+                    for weight, digit in enumerate(reversed(digits[:-1]), start=1)
+                )
+                % 10
+            )
+            if checksum != int(digits[-1]):
+                continue
+            yield RawCandidate(
+                text=value,
+                start=match.start(),
+                end=match.end(),
+                types=(CandidateType.CHEMICAL_ENTITY,),
+                confidence=0.99,
+                extractor=self.name,
+                extractor_version=self.version,
+                raw_label="CAS_RN",
+            )
+
+    def _smiles(self, text: str) -> Iterator[RawCandidate]:
+        for match in _SMILES.finditer(text):
+            start, end = match.span("value")
+            yield RawCandidate(
+                text=match.group("value"),
+                start=start,
+                end=end,
+                types=(CandidateType.CHEMICAL_ENTITY,),
+                confidence=0.98,
+                extractor=self.name,
+                extractor_version=self.version,
+                raw_label="SMILES",
+            )
 
     def _matches(
         self,

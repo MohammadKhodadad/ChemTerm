@@ -30,6 +30,8 @@ _CHEMU_ROLE_MAP: dict[str, ContextRole] = {
     "SOLVENT": ContextRole.SOLVENT,
 }
 
+CHEMU_MODEL = "mpkato/chemu-biobert-ner"
+
 
 class TransformersNerExtractor:
     """Adapt any character-offset Hugging Face NER model to ChemTerm."""
@@ -118,3 +120,22 @@ class TransformersNerExtractor:
         if "MATERIAL" in normalized:
             return CandidateType.MATERIAL
         return CandidateType.OTHER_TECHNICAL_CONCEPT
+
+
+class ChemUNerExtractor(TransformersNerExtractor):
+    """ChEMU patent-reaction NER with controlled ChemTerm label mapping."""
+
+    name = "chemu_ner"
+
+    def __init__(
+        self,
+        model_name: str = CHEMU_MODEL,
+        *,
+        pipeline_factory: Callable[..., Any] | None = None,
+    ) -> None:
+        super().__init__(
+            model_name,
+            pipeline_factory=pipeline_factory,
+            label_types=_CHEMU_TYPE_MAP,
+            label_roles=_CHEMU_ROLE_MAP,
+        )

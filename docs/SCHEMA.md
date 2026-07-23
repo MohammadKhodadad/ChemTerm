@@ -311,10 +311,14 @@ English extraction has two complementary tracks.
 
 Use:
 
-- ChemDataExtractor 2 for broad organic/inorganic chemical mentions;
-- a ChEMU-trained model for reaction-heavy patent passages;
+- ChemDataExtractor 2, through an isolated Python 3.11 worker, for broad
+  organic/inorganic chemical mentions;
+- `mpkato/chemu-biobert-ner` for reaction-heavy patent passages, with its labels
+  mapped to controlled ChemTerm types and context roles;
 - optional HunFlair2 for biomedical/pharmaceutical subsets;
-- deterministic rules for formulas, identifiers, abbreviations, quantities, and patent labels.
+- high-precision deterministic rules for formulas, InChI, InChIKey, checksum-valid
+  CAS registry numbers, explicitly labelled SMILES, pH, quantities/ranges,
+  abbreviations, and patent labels.
 
 ### 5.2 Complex terminology extraction
 
@@ -333,6 +337,12 @@ Add:
 - C-value/NC-value or equivalent termhood scoring;
 - domain frequency versus general English;
 - recurrence across independent patent families.
+
+Before LLM refinement, exact duplicate spans from independent extractors are
+reconciled. The result retains all contributing extractor names, raw labels, roles,
+and component confidences, removes redundant parent types, and flags incompatible
+top-level type evidence for review. Nested spans and repeated occurrences are not
+collapsed.
 
 ### 5.3 LLM refinement
 

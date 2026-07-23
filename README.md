@@ -135,14 +135,49 @@ uv run chemterm-extract data/chemistry-patents-4-language-sample-preview.csv `
   --output reports/sample-candidates.jsonl
 ```
 
-Enable an optional Hugging Face token-classification model:
+Enable ChEMU BioBERT for patent reaction entities:
 
 ```powershell
 uv sync --extra ner
 uv run chemterm-extract data/chemistry-patents-4-language-sample-preview.csv `
-  --ner-model mpkato/chemu-biobert-ner `
+  --chemu `
   --output reports/sample-ner-candidates.jsonl
 ```
+
+ChEMU is trained on organic-synthesis patent passages and is licensed CC BY-NC 3.0.
+Use it only where non-commercial research terms are acceptable. The adapter maps
+reaction roles, conditions, yields, and labels into ChemTerm's controlled contracts.
+
+ChemDataExtractor 2 officially supports Python 3.9–3.11, so keep it in an isolated
+Python 3.11 environment:
+
+```powershell
+uv venv .venv-cde --python 3.11
+uv pip install --python .venv-cde\Scripts\python.exe -r requirements-cde.txt
+uv run chemterm-extract data/chemistry-patents-4-language-sample-preview.csv `
+  --cde-python .venv-cde\Scripts\python.exe `
+  --output reports/sample-cde-candidates.jsonl
+```
+
+On WSL, use `.venv-cde/bin/python` instead. The persistent JSON-lines worker keeps
+ChemDataExtractor isolated while preserving exact character offsets. Keep the
+`transformers<5` constraint from `requirements-cde.txt`; ChemDataExtractor 2.4's
+tagging stack is not compatible with Transformers 5.
+
+Run both NER systems, deterministic rules, reconciliation, and LLM refinement:
+
+```powershell
+uv run chemterm-extract data/chemistry-patents-4-language-sample-preview.csv `
+  --chemu `
+  --cde-python .venv-cde\Scripts\python.exe `
+  --llm `
+  --pair-languages de fr `
+  --output reports/sample-combined.jsonl
+```
+
+All extractors run independently. Exact duplicate spans are reconciled before the
+LLM, retaining component models, labels, roles, and confidence values. Repeated
+occurrences remain separate evidence mentions.
 
 Enable schema-constrained LLM refinement after configuring
 `CHEMTERM_LLM_API_KEY` and `CHEMTERM_LLM_MODEL`:
