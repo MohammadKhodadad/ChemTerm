@@ -17,6 +17,8 @@ You are not translating or rewriting either document. For every source_id, locat
 contiguous target substring expressing the same concept in this context. Copy target_text
 exactly, including its source spelling and script, and return zero-based end-exclusive offsets.
 Never generate a corrected spelling, transliteration, or phrase absent from target_text.
+Texts may contain title and abstract section markers. Use both sections as context, but never
+return marker text or create a mapping span crossing section boundaries.
 
 Return exactly one decision per source_id:
 - EXACT_EQUIVALENT: the target span denotes the same concept.

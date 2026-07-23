@@ -344,6 +344,13 @@ and component confidences, removes redundant parent types, and flags incompatibl
 top-level type evidence for review. Nested spans and repeated occurrences are not
 collapsed.
 
+Title and abstract units remain independent provenance records with section-local
+offsets. If both exist for a language, they are presented together to the LLM using
+non-term section markers. Returned grouped offsets must fall wholly inside one source
+section and are projected back to that section. This provides cross-section context
+without storing synthetic concatenated text or paying for separate title and abstract
+requests.
+
 ### 5.3 LLM refinement
 
 The LLM receives:

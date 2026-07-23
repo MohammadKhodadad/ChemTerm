@@ -62,6 +62,79 @@ class RoutingFakeLlmClient:
         return self.responses[payload["target_language"]]
 
 
+class EchoRefinementClient:
+    """Confirm every grouped baseline candidate and count requests."""
+
+    model = "fake-grouped-model"
+
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, Any]] = []
+
+    def complete_json(
+        self,
+        *,
+        system_prompt: str,
+        payload: dict[str, Any],
+        response_model: type,
+    ) -> dict[str, Any]:
+        self.payloads.append(payload)
+        return {
+            "terms": [
+                {
+                    "text": candidate["text"],
+                    "start": candidate["start"],
+                    "end": candidate["end"],
+                    "types": candidate["types"],
+                    "roles": candidate["roles"],
+                    "proposed_definition": None,
+                    "scope_decision": "IN_SCOPE",
+                    "confidence": 0.95,
+                    "source": "candidate_confirmed",
+                    "needs_review": False,
+                    "reason_code": "GROUPED_TEST_CONFIRMATION",
+                }
+                for candidate in payload["candidates"]
+            ]
+        }
+
+
+class GroupedMappingClient:
+    """Map title and abstract candidates in one target-language request."""
+
+    model = "fake-grouped-mapping-model"
+
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, Any]] = []
+
+    def complete_json(
+        self,
+        *,
+        system_prompt: str,
+        payload: dict[str, Any],
+        response_model: type,
+    ) -> dict[str, Any]:
+        self.payloads.append(payload)
+        target_by_source = {
+            "Gold alloy": "Goldlegierung",
+            "copper coating": "Kupferbeschichtung",
+        }
+        return {
+            "mappings": [
+                {
+                    "source_id": term["source_id"],
+                    "target_text": (target := target_by_source[term["text"]]),
+                    "target_start": (start := payload["target_text"].index(target)),
+                    "target_end": start + len(target),
+                    "relation": "EXACT_EQUIVALENT",
+                    "confidence": 0.98,
+                    "needs_review": False,
+                    "reason_code": "GROUPED_PARALLEL_TERM",
+                }
+                for term in payload["english_terms"]
+            ]
+        }
+
+
 def _record(text: str) -> PatentInput:
     return PatentInput(
         source_record_id="sample:1",
@@ -323,6 +396,75 @@ def test_llm_refiner_mechanically_removes_out_of_scope_decisions() -> None:
     )
     assert pairing.mappings == ()
     assert pairing.issues == ()
+
+
+def test_title_and_abstract_share_one_refinement_request_with_local_offsets() -> None:
+    record = PatentInput(
+        source_record_id="sample:grouped-refinement",
+        publication_number="EP-3-A1",
+        text_units=(
+            TextUnit(language="en", text="Gold alloy", unit_type=TextUnitType.TITLE),
+            TextUnit(
+                language="en",
+                text="A copper coating protects the surface.",
+                unit_type=TextUnitType.ABSTRACT,
+            ),
+        ),
+    )
+    client = EchoRefinementClient()
+    pipeline = EnglishExtractionPipeline(
+        extractors=(TechnicalPhraseExtractor(),),
+        refiners=(LlmTermRefiner(client),),
+    )
+
+    result = pipeline.extract(record)
+
+    assert len(client.payloads) == 1
+    assert "[[SECTION" in client.payloads[0]["text"]
+    assert result.refined_text_unit_indices == (0, 1)
+    assert {(item.text, item.text_unit_index) for item in result.refined_candidates} == {
+        ("Gold alloy", 0),
+        ("copper coating", 1),
+    }
+    for candidate in result.refined_candidates:
+        source = record.text_units[candidate.text_unit_index].text
+        assert source[candidate.original_start : candidate.original_end] == candidate.text
+
+
+def test_title_and_abstract_share_one_mapping_request_per_language() -> None:
+    record = PatentInput(
+        source_record_id="sample:grouped-mapping",
+        publication_number="EP-4-A1",
+        text_units=(
+            TextUnit(language="en", text="Gold alloy", unit_type=TextUnitType.TITLE),
+            TextUnit(
+                language="en",
+                text="A copper coating protects the surface.",
+                unit_type=TextUnitType.ABSTRACT,
+            ),
+            TextUnit(language="de", text="Goldlegierung", unit_type=TextUnitType.TITLE),
+            TextUnit(
+                language="de",
+                text="Eine Kupferbeschichtung schützt die Oberfläche.",
+                unit_type=TextUnitType.ABSTRACT,
+            ),
+        ),
+    )
+    extraction = EnglishExtractionPipeline(extractors=(TechnicalPhraseExtractor(),)).extract(record)
+    client = GroupedMappingClient()
+
+    result = MultilingualPairingPipeline(LlmParallelTextMapper(client)).pair(record, extraction)
+
+    assert len(client.payloads) == 1
+    assert {(item.target_text, item.target_text_unit_index) for item in result.mappings} == {
+        ("Goldlegierung", 2),
+        ("Kupferbeschichtung", 3),
+    }
+    assert {(item.target_text, item.target_normalized_start) for item in result.mappings} == {
+        ("Goldlegierung", 0),
+        ("Kupferbeschichtung", 5),
+    }
+    assert result.issues == ()
 
 
 def test_parallel_pairing_maps_exact_native_language_spans() -> None:

@@ -1,4 +1,4 @@
-"""Streaming adapter for multilingual patent-title CSV files."""
+"""Streaming adapter for multilingual patent title and abstract CSV files."""
 
 from __future__ import annotations
 
@@ -23,12 +23,10 @@ from chemterm.ingestion.base import (
 
 
 class CsvTitleAdapter:
-    """Map a wide multilingual title CSV into canonical patent inputs.
+    """Map a wide multilingual patent-text CSV into canonical patent inputs.
 
-    Language columns are discovered dynamically from the ``title_<language>``
-    prefix, so the adapter is not limited to the current four test columns.
-    Examples include ``title_zh``, ``title_zh_hans``, ``title_ja``, and
-    ``title_ru``.
+    Language columns are discovered dynamically from ``title_<language>`` and
+    ``abstract_<language>`` prefixes.
     """
 
     def __init__(
@@ -49,27 +47,42 @@ class CsvTitleAdapter:
         self.report = AdapterReport()
         with self.path.open("r", encoding=self.encoding, newline="") as source:
             reader = csv.DictReader(source)
-            title_columns = self._discover_title_columns(reader.fieldnames)
+            text_columns = self._discover_text_columns(reader.fieldnames)
 
             for row_number, row in enumerate(reader, start=2):
                 self.report.rows_seen += 1
-                record = self._map_row(row, row_number, title_columns)
+                record = self._map_row(row, row_number, text_columns)
                 if record is None:
                     continue
                 self.report.records_emitted += 1
                 yield record
 
-    def _discover_title_columns(self, fieldnames: list[str] | None) -> tuple[tuple[str, str], ...]:
+    def _discover_text_columns(
+        self,
+        fieldnames: list[str] | None,
+    ) -> tuple[tuple[str, str, TextUnitType], ...]:
         if not fieldnames:
             raise AdapterConfigurationError("CSV has no header")
         if "publication_number" not in fieldnames:
             raise AdapterConfigurationError("CSV requires a publication_number column")
 
-        discovered: list[tuple[str, str]] = []
+        discovered: list[tuple[str, str, TextUnitType]] = []
         for column in fieldnames:
-            if not column.startswith("title_"):
+            prefix_and_type = next(
+                (
+                    (prefix, unit_type)
+                    for prefix, unit_type in (
+                        ("title_", TextUnitType.TITLE),
+                        ("abstract_", TextUnitType.ABSTRACT),
+                    )
+                    if column.startswith(prefix)
+                ),
+                None,
+            )
+            if prefix_and_type is None:
                 continue
-            raw_language = column.removeprefix("title_").replace("_", "-")
+            prefix, unit_type = prefix_and_type
+            raw_language = column.removeprefix(prefix).replace("_", "-")
             try:
                 language = canonicalize_language_tag(raw_language)
             except ValueError as error:
@@ -81,17 +94,19 @@ class CsvTitleAdapter:
                     )
                 )
                 continue
-            discovered.append((column, language))
+            discovered.append((column, language, unit_type))
 
         if not discovered:
-            raise AdapterConfigurationError("CSV requires at least one title_<language> column")
+            raise AdapterConfigurationError(
+                "CSV requires at least one title_<language> or abstract_<language> column"
+            )
         return tuple(discovered)
 
     def _map_row(
         self,
         row: dict[str, str | None],
         row_number: int,
-        title_columns: tuple[tuple[str, str], ...],
+        text_columns: tuple[tuple[str, str, TextUnitType], ...],
     ) -> PatentInput | None:
         publication_number = (row.get("publication_number") or "").strip()
         source_record_id = f"{self.source_name}:{row_number}"
@@ -100,12 +115,12 @@ class CsvTitleAdapter:
             TextUnit(
                 language=language,
                 text=value,
-                unit_type=TextUnitType.TITLE,
-                locator="title",
+                unit_type=unit_type,
+                locator=unit_type.value,
                 text_origin=TextOrigin.UNKNOWN,
                 metadata={"source_column": column},
             )
-            for column, language in title_columns
+            for column, language, unit_type in text_columns
             if (value := row.get(column)) is not None and value.strip()
         )
 
@@ -114,7 +129,7 @@ class CsvTitleAdapter:
                 AdapterIssue(
                     row_number=row_number,
                     code="NO_TEXT",
-                    message="row has no non-empty multilingual title",
+                    message="row has no non-empty multilingual title or abstract",
                     source_record_id=source_record_id,
                 )
             )
@@ -127,7 +142,7 @@ class CsvTitleAdapter:
                 AdapterIssue(
                     row_number=row_number,
                     code="MISSING_DECLARED_LANGUAGE",
-                    message=f"declared language {language!r} has no title text",
+                    message=f"declared language {language!r} has no title or abstract text",
                     source_record_id=source_record_id,
                 )
             )
@@ -136,7 +151,7 @@ class CsvTitleAdapter:
                 AdapterIssue(
                     row_number=row_number,
                     code="UNDECLARED_AVAILABLE_LANGUAGE",
-                    message=f"title language {language!r} was not declared",
+                    message=f"text language {language!r} was not declared",
                     source_record_id=source_record_id,
                 )
             )

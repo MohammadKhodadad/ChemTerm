@@ -6,7 +6,11 @@ from collections.abc import Iterable
 
 from chemterm.config import get_settings
 from chemterm.contracts.extraction import EnglishExtractionResult, TermCandidate
-from chemterm.contracts.input import PatentInput, canonicalize_language_tag
+from chemterm.contracts.input import (
+    PatentInput,
+    TextUnitType,
+    canonicalize_language_tag,
+)
 from chemterm.contracts.mapping import (
     MappingIssue,
     MultilingualMappingResult,
@@ -15,6 +19,7 @@ from chemterm.contracts.mapping import (
 from chemterm.llm import OpenAICompatibleJsonClient
 from chemterm.mapping import LlmParallelTextMapper, ParallelTextMapper
 from chemterm.normalization import normalize_source_text
+from chemterm.pipeline.grouped_text import GroupedText
 
 
 class MultilingualPairingPipeline:
@@ -42,8 +47,34 @@ class MultilingualPairingPipeline:
 
         mappings: list[TargetTermMapping] = []
         issues: list[MappingIssue] = []
+        english_group_indices = tuple(
+            index
+            for index, unit in enumerate(record.text_units)
+            if unit.language.split("-", maxsplit=1)[0] == "en"
+            and unit.unit_type in {TextUnitType.TITLE, TextUnitType.ABSTRACT}
+        )
+        english_group_types = {
+            record.text_units[index].unit_type for index in english_group_indices
+        }
+        grouped_indices = (
+            english_group_indices
+            if {TextUnitType.TITLE, TextUnitType.ABSTRACT}.issubset(english_group_types)
+            else ()
+        )
+        if grouped_indices:
+            grouped_mappings, grouped_issues = self._pair_grouped_units(
+                record,
+                english_result,
+                grouped_indices,
+                allowed_languages,
+            )
+            mappings.extend(grouped_mappings)
+            issues.extend(grouped_issues)
+
         for english_unit_index, english_unit in enumerate(record.text_units):
             if english_unit.language.split("-", maxsplit=1)[0] != "en":
+                continue
+            if english_unit_index in grouped_indices:
                 continue
 
             english_candidates = self._select_candidates(english_result, english_unit_index)
@@ -100,6 +131,81 @@ class MultilingualPairingPipeline:
             issues=tuple(issues),
         )
 
+    def _pair_grouped_units(
+        self,
+        record: PatentInput,
+        english_result: EnglishExtractionResult,
+        english_unit_indices: tuple[int, ...],
+        allowed_languages: set[str] | None,
+    ) -> tuple[list[TargetTermMapping], list[MappingIssue]]:
+        english_candidates = tuple(
+            candidate
+            for unit_index in english_unit_indices
+            for candidate in self._select_candidates(english_result, unit_index)
+        )
+        if not english_candidates:
+            return [], []
+
+        english_group = GroupedText.from_record(record, english_unit_indices)
+        shifted_candidates = tuple(
+            english_group.shift_term(candidate) for candidate in english_candidates
+        )
+        source_shapes = {
+            (
+                record.text_units[index].unit_type,
+                record.text_units[index].locator,
+            )
+            for index in english_unit_indices
+        }
+        target_languages = {
+            unit.language
+            for unit in record.text_units
+            if unit.language.split("-", maxsplit=1)[0] != "en"
+            and (allowed_languages is None or unit.language in allowed_languages)
+        }
+
+        mappings: list[TargetTermMapping] = []
+        issues: list[MappingIssue] = []
+        for target_language in sorted(target_languages):
+            target_indices = tuple(
+                index
+                for index, unit in enumerate(record.text_units)
+                if unit.language == target_language
+                and (unit.unit_type, unit.locator) in source_shapes
+            )
+            if not target_indices:
+                continue
+            target_group = GroupedText.from_record(record, target_indices)
+            try:
+                raw_mappings = self.mapper.map_terms(
+                    english_text=english_group.text,
+                    english_candidates=shifted_candidates,
+                    target_language=target_language,
+                    target_text=target_group.text,
+                )
+                self._validate_coverage(raw_mappings, len(shifted_candidates))
+                mappings.extend(
+                    self._ground_grouped_mappings(
+                        record,
+                        shifted_candidates,
+                        target_group,
+                        target_language,
+                        raw_mappings,
+                    )
+                )
+            except Exception as error:
+                issues.append(
+                    MappingIssue(
+                        source_record_id=record.source_record_id,
+                        target_text_unit_index=target_indices[0],
+                        target_language=target_language,
+                        mapper=self.mapper.name,
+                        code="GROUPED_TARGET_MAPPING_FAILED",
+                        message=str(error),
+                    )
+                )
+        return mappings, issues
+
     @staticmethod
     def _select_candidates(
         result: EnglishExtractionResult,
@@ -146,6 +252,65 @@ class MultilingualPairingPipeline:
             raise ValueError("mapper returned duplicate source candidate decisions")
         if set(indices) != set(range(candidate_count)):
             raise ValueError("mapper must return one decision per source candidate")
+
+    def _ground_grouped_mappings(
+        self,
+        record: PatentInput,
+        english_candidates: tuple[TermCandidate, ...],
+        target_group: GroupedText,
+        target_language: str,
+        raw_mappings: tuple,
+    ) -> list[TargetTermMapping]:
+        results: list[TargetTermMapping] = []
+        for raw_mapping in raw_mappings:
+            source = english_candidates[raw_mapping.source_candidate_index]
+            target_index = target_group.segments[0].unit_index
+            target_start: int | None = None
+            target_end: int | None = None
+            original_start: int | None = None
+            original_end: int | None = None
+            if raw_mapping.target_text is not None:
+                assert raw_mapping.target_start is not None
+                assert raw_mapping.target_end is not None
+                segment, target_start, target_end = target_group.local_span(
+                    raw_mapping.target_start,
+                    raw_mapping.target_end,
+                )
+                exact = segment.normalized.normalized_text[target_start:target_end]
+                if exact != raw_mapping.target_text:
+                    raise ValueError(
+                        f"mapper target {raw_mapping.target_text!r} "
+                        f"does not match target source span {exact!r}"
+                    )
+                target_index = segment.unit_index
+                original_start, original_end = segment.normalized.original_span(
+                    target_start,
+                    target_end,
+                )
+
+            results.append(
+                TargetTermMapping(
+                    source_record_id=record.source_record_id,
+                    source_text_unit_index=source.text_unit_index,
+                    source_candidate_index=raw_mapping.source_candidate_index,
+                    source_text=source.text,
+                    source_types=source.types,
+                    target_language=target_language,
+                    target_text_unit_index=target_index,
+                    target_text=raw_mapping.target_text,
+                    target_normalized_start=target_start,
+                    target_normalized_end=target_end,
+                    target_original_start=original_start,
+                    target_original_end=original_end,
+                    relation=raw_mapping.relation,
+                    confidence=raw_mapping.confidence,
+                    needs_review=raw_mapping.needs_review,
+                    mapper=self.mapper.name,
+                    mapper_version=self.mapper.version,
+                    reason_code=raw_mapping.reason_code,
+                )
+            )
+        return results
 
     def _ground_mappings(
         self,

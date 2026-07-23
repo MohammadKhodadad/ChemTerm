@@ -135,6 +135,12 @@ uv run chemterm-extract data/chemistry-patents-4-language-sample-preview.csv `
   --output reports/sample-candidates.jsonl
 ```
 
+The CSV adapter discovers both `title_<language>` and `abstract_<language>` columns.
+When both are present, local extractors still process each section independently,
+while LLM refinement sends the title and abstract together in one request. Section
+markers and offset projection keep every accepted span attached to its original
+title or abstract.
+
 Enable ChEMU BioBERT for patent reaction entities:
 
 ```powershell
@@ -178,6 +184,10 @@ uv run chemterm-extract data/chemistry-patents-4-language-sample-preview.csv `
 All extractors run independently. Exact duplicate spans are reconciled before the
 LLM, retaining component models, labels, roles, and confidence values. Repeated
 occurrences remain separate evidence mentions.
+
+Multilingual pairing also groups the parallel title and abstract into one request
+per target language. A mapped span is projected back to the exact target section
+and its section-local original offsets.
 
 Enable schema-constrained LLM refinement after configuring
 `CHEMTERM_LLM_API_KEY` and `CHEMTERM_LLM_MODEL`:

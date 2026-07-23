@@ -695,10 +695,11 @@ Status: implemented.
 - implement a streaming CSV adapter for the current sample shape;
 - parse quoted commas correctly;
 - preserve source text for the normalization stage, including HTML entities;
-- derive available languages from non-empty title columns;
+- derive available languages from non-empty title or abstract columns;
 - preserve source values and row identifiers;
 - flag the empty Dutch field rather than claiming Dutch support;
-- discover arbitrary `title_<language>` columns, including Chinese, Japanese, and Russian;
+- discover arbitrary `title_<language>` and `abstract_<language>` columns, including
+  Chinese, Japanese, and Russian;
 - produce adapter metrics for accepted/rejected rows;
 - add golden tests for all sample rows and malformed cases.
 
@@ -781,6 +782,12 @@ Status: integration implemented ahead of schedule; quality evaluation remains pe
 - compare baseline versus LLM-refined quality and cost.
 
 The integration uses a provider-isolated OpenAI-compatible JSON-schema client, exact-substring validation, fixed type/role enums, fail-closed issue reporting, and optional configuration. It is disabled by default and is not production-qualified until benchmarked.
+
+When English title and abstract units are both available, baseline extraction remains
+section-local but LLM refinement groups both sections into one request. Explicit section
+markers and deterministic offset projection prohibit cross-section terms and preserve the
+original source unit. Parallel title and abstract text is likewise grouped into one request
+per target language and projected back to section-local target offsets.
 
 Exit gate: LLM refinement measurably improves held-out exact-span/type metrics without unacceptable hallucination or instability.
 

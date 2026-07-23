@@ -106,6 +106,25 @@ def test_csv_adapter_rejects_rows_without_identity_or_text(tmp_path: Path) -> No
     }
 
 
+def test_csv_adapter_emits_title_and_abstract_units_per_language(tmp_path: Path) -> None:
+    csv_path = tmp_path / "patent-text.csv"
+    csv_path.write_text(
+        "publication_number,languages,title_en,abstract_en,title_de,abstract_de\n"
+        "EP-3-A1,en|de,Gold alloy,A copper coating.,Goldlegierung,"
+        "Eine Kupferbeschichtung.\n",
+        encoding="utf-8",
+    )
+
+    record = next(CsvTitleAdapter(csv_path).records())
+
+    assert [(unit.language, unit.unit_type, unit.locator) for unit in record.text_units] == [
+        ("en", TextUnitType.TITLE, "title"),
+        ("en", TextUnitType.ABSTRACT, "abstract"),
+        ("de", TextUnitType.TITLE, "title"),
+        ("de", TextUnitType.ABSTRACT, "abstract"),
+    ]
+
+
 def test_source_normalization_decodes_html_with_offset_mapping() -> None:
     result = normalize_source_text("d&#39;or")
 

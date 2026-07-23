@@ -11,7 +11,7 @@ from chemterm.contracts.extraction import (
     RawCandidate,
     TermCandidate,
 )
-from chemterm.contracts.input import PatentInput
+from chemterm.contracts.input import PatentInput, TextUnitType
 from chemterm.extraction import (
     CHEMU_MODEL,
     CandidateExtractor,
@@ -26,6 +26,7 @@ from chemterm.extraction import (
 )
 from chemterm.llm import LlmTermRefiner, OpenAICompatibleJsonClient
 from chemterm.normalization import NormalizedText, normalize_source_text
+from chemterm.pipeline.grouped_text import GroupedText
 
 
 class EnglishExtractionPipeline:
@@ -51,6 +52,7 @@ class EnglishExtractionPipeline:
         refined: list[TermCandidate] = []
         refined_units: set[int] = set()
         issues: list[ExtractionIssue] = []
+        unit_baselines: dict[int, tuple[NormalizedText, tuple[RawCandidate, ...]]] = {}
 
         for unit_index, unit in enumerate(record.text_units):
             if unit.language.split("-", maxsplit=1)[0] != "en":
@@ -122,7 +124,78 @@ class EnglishExtractionPipeline:
                 )
                 for prediction in baseline_for_unit
             )
-            for refiner in self.refiners:
+            unit_baselines[unit_index] = (normalized, baseline_for_unit)
+
+        group_indices = tuple(
+            unit_index
+            for unit_index in unit_baselines
+            if record.text_units[unit_index].unit_type
+            in {TextUnitType.TITLE, TextUnitType.ABSTRACT}
+        )
+        group_types = {record.text_units[index].unit_type for index in group_indices}
+        grouped_indices = (
+            group_indices
+            if {TextUnitType.TITLE, TextUnitType.ABSTRACT}.issubset(group_types)
+            else ()
+        )
+
+        for refiner in self.refiners:
+            if grouped_indices:
+                grouped = GroupedText.from_record(record, grouped_indices)
+                grouped_candidates = tuple(
+                    grouped.shift_raw(candidate, unit_index)
+                    for unit_index in grouped_indices
+                    for candidate in unit_baselines[unit_index][1]
+                )
+                try:
+                    predictions = refiner.refine(grouped.text, grouped_candidates)
+                except Exception as error:
+                    issues.append(
+                        self._issue(
+                            record,
+                            grouped_indices[0],
+                            refiner.name,
+                            "GROUPED_REFINER_FAILED",
+                            str(error),
+                        )
+                    )
+                else:
+                    refined_units.update(grouped_indices)
+                    for prediction in predictions:
+                        try:
+                            segment, local_start, local_end = grouped.local_span(
+                                prediction.start,
+                                prediction.end,
+                            )
+                            local_prediction = prediction.model_copy(
+                                update={"start": local_start, "end": local_end}
+                            )
+                            refined.append(
+                                self._ground_candidate(
+                                    record,
+                                    segment.unit_index,
+                                    segment.language,
+                                    segment.normalized,
+                                    local_prediction,
+                                )
+                            )
+                        except ValueError as error:
+                            issues.append(
+                                self._issue(
+                                    record,
+                                    grouped_indices[0],
+                                    refiner.name,
+                                    "INVALID_GROUPED_REFINED_SPAN",
+                                    str(error),
+                                )
+                            )
+
+            individual_indices = (
+                unit_index for unit_index in unit_baselines if unit_index not in grouped_indices
+            )
+            for unit_index in individual_indices:
+                normalized, baseline_for_unit = unit_baselines[unit_index]
+                unit = record.text_units[unit_index]
                 try:
                     predictions = refiner.refine(
                         normalized.normalized_text,

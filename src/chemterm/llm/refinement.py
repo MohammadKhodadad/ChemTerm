@@ -26,6 +26,9 @@ Apply terminology scope policy {SCOPE_POLICY_VERSION} exactly:
 {render_scope_policy()}
 
 Use only exact, contiguous substrings from the provided text and the allowed type/role enums.
+The text may contain title and abstract section markers. Use both sections as context, but
+never return marker text or create a term spanning two sections. Offsets refer to the complete
+grouped text.
 NER and rule candidates are incomplete hints: confirm useful candidates and add missed exact spans.
 Prefer meaningful multi-word terms. Keep nested terms only when each is independently useful.
 Choose the most specific supported type; use a parent type only when evidence is insufficient.
