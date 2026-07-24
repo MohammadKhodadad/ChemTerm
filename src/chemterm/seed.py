@@ -94,6 +94,18 @@ IDENTIFIER_NAMESPACES: tuple[tuple[str, str, str, str], ...] = (
         "supporting",
     ),
     (
+        "WIKIPEDIA_EN",
+        "English Wikipedia page",
+        "Human-readable English encyclopedia page linked through a Wikidata item.",
+        "supporting",
+    ),
+    (
+        "IATE",
+        "IATE entry",
+        "Interactive Terminology for Europe multilingual terminology entry.",
+        "supporting",
+    ),
+    (
         "CAS_RN",
         "CAS Registry Number",
         "Registry identifier subject to CAS licensing and redistribution constraints.",

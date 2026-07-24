@@ -6,9 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from chemterm.contracts.extraction import CandidateType
+from chemterm.contracts.mapping import TargetFormStatus
 from chemterm.models import Base
-from chemterm.schemas import EvidenceSetCreate, TermCreate
-from chemterm.seed import CONCEPT_TYPES
+from chemterm.schemas import EvidenceSetCreate, TermCreate, TermEvidenceCreate
+from chemterm.seed import CONCEPT_TYPES, IDENTIFIER_NAMESPACES
 from chemterm.taxonomy import CONCEPT_TYPE_DEFINITIONS
 
 
@@ -48,6 +49,8 @@ def test_resolution_schema_has_controlled_identifiers_and_search_indexes() -> No
         index for index in embedding.indexes if index.name == "ix_concept_embedding_hnsw"
     )
     assert vector_index.dialect_options["postgresql"]["using"] == "hnsw"
+    namespace_codes = {item[0] for item in IDENTIFIER_NAMESPACES}
+    assert {"PUBCHEM_CID", "WIKIDATA", "WIKIPEDIA_EN", "IATE"} <= namespace_codes
 
 
 def test_term_has_one_concept_and_language() -> None:
@@ -56,6 +59,31 @@ def test_term_has_one_concept_and_language() -> None:
     assert not table.c.concept_id.nullable
     assert not table.c.language.nullable
     assert table.c.concept_id.foreign_keys
+
+
+def test_term_evidence_records_target_form_status() -> None:
+    table = Base.metadata.tables["term_evidence"]
+
+    assert not table.c.target_form_status.nullable
+    evidence = TermEvidenceCreate(
+        term_id=uuid.uuid4(),
+        family_id="family-1",
+        publication_number="EP-1-A1",
+        source_language="de",
+        target_form_status=TargetFormStatus.UNCHANGED,
+        confidence=0.9,
+    )
+    assert evidence.target_form_status == TargetFormStatus.UNCHANGED
+
+    with pytest.raises(ValidationError, match="NOT_PRESENT"):
+        TermEvidenceCreate(
+            term_id=uuid.uuid4(),
+            family_id="family-1",
+            publication_number="EP-1-A1",
+            source_language="de",
+            target_form_status=TargetFormStatus.NOT_PRESENT,
+            confidence=0.9,
+        )
 
 
 def test_preferred_term_index_is_unique() -> None:

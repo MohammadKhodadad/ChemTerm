@@ -197,8 +197,8 @@ pattern, lifecycle status, and identity strength:
 - `supporting`: useful retrieval evidence that cannot establish identity alone.
 
 Seeded namespaces are ChEBI, PubChem CID, InChI, InChIKey, canonical and isomeric
-SMILES, molecular formula, Wikidata, and CAS RN. CAS data use and redistribution
-must respect applicable licensing.
+SMILES, molecular formula, Wikidata, English Wikipedia, IATE, and CAS RN. CAS data
+use and redistribution must respect applicable licensing.
 
 ### `concept_identifier`
 
@@ -207,12 +207,26 @@ Optional mapping to an external authority:
 - ChEBI;
 - PubChem CID;
 - Wikidata;
+- English Wikipedia page;
+- IATE terminology entry;
 - InChIKey;
 - other approved namespaces.
 
 Mappings reference `identifier_namespace` and have a type (`exact`, `close`, `broad`,
 `narrow`, or `related`), confidence, and source URI. Free-form namespace names are
 not accepted.
+
+`ExternalReferenceRepository` persists accepted external matches here. Ambiguous
+homonyms and weak matches remain review candidates unless explicitly included.
+PubChem lookup is limited to compatible chemical-entity types. Wikidata lookup
+uses exact labels or aliases plus chemistry-aware description filtering and obtains
+English Wikipedia URLs from Wikidata sitelinks. IATE exact-string matches retain
+their entry IDs and definitions, but multiple same-label entries require review.
+
+Patent provenance is not duplicated in this table. A concept reaches publication
+and family identifiers through `concept -> term -> term_evidence -> evidence_set`.
+This keeps external authority identity separate from the documents that mention
+the concept while allowing both reference sets to be retrieved together.
 
 ### `concept_embedding`
 
@@ -255,9 +269,21 @@ Connects a term to a minimal patent reference inside an evidence set.
 | `source_uri` | Source link |
 | `evidence_excerpt` | Optional short excerpt |
 | `text_origin` | Original, official translation, machine translation, or unknown |
+| `target_form_status` | Translated, unchanged, language-neutral, or unknown |
 | `confidence` | Evidence confidence |
 
 The excerpt is optional so restricted patent text can be excluded while keeping reproducible references.
+
+An unchanged target form is still stored as a term in the target language. For
+example, `"polymer" [de]` may be a valid German label even when its surface form is
+identical to English. `target_form_status=UNCHANGED` records that observation on
+the evidence. `LANGUAGE_NEUTRAL` is reserved for formulas, identifiers, and
+notations that are not naturally translated. `NO_MATCH`/`NOT_PRESENT` creates no
+target term or term evidence because no target-language label was observed.
+
+This status is not a `term_form`: translation behavior depends on the source-target
+observation, while systematic name, abbreviation, trade name, and similar forms
+are intrinsic linguistic properties of the term.
 
 ### `relation_type` and `concept_relation`
 

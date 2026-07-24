@@ -224,12 +224,13 @@ class ConceptSearchRepository:
             types[concept_id].append(code)
 
         identifiers: dict[uuid.UUID, list[ConceptIdentifierView]] = defaultdict(list)
-        for concept_id, code, value, strength in self.session.execute(
+        for concept_id, code, value, strength, source_uri in self.session.execute(
             select(
                 ConceptIdentifier.concept_id,
                 IdentifierNamespace.code,
                 ConceptIdentifier.external_id,
                 IdentifierNamespace.identity_strength,
+                ConceptIdentifier.source_uri,
             )
             .join(
                 IdentifierNamespace,
@@ -242,6 +243,7 @@ class ConceptSearchRepository:
                     namespace=code,
                     value=value,
                     identity_strength=strength,
+                    source_uri=source_uri,
                 )
             )
 

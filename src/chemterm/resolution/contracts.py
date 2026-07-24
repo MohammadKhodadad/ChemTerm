@@ -39,6 +39,7 @@ class ConceptIdentifierView(BaseModel):
     namespace: str
     value: str
     identity_strength: str
+    source_uri: str | None = None
 
 
 class RetrievalScores(BaseModel):

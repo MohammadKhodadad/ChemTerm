@@ -793,9 +793,9 @@ Exit gate: LLM refinement measurably improves held-out exact-span/type metrics w
 
 ### Step 8: English concept resolution and deduplication
 
-Status: retrieval and bounded LLM decision infrastructure implemented; external
-vocabulary lookup, persistence, calibration, and PostgreSQL integration evaluation
-remain pending.
+Status: retrieval, bounded LLM decisions, and external PubChem/Wikidata/Wikipedia/
+IATE enrichment are implemented; end-to-end concept creation, calibration, and
+PostgreSQL integration evaluation remain pending.
 
 - normalize candidates using the appropriate profile;
 - search existing English terms globally before creating concepts;
@@ -821,6 +821,14 @@ Implemented components:
 - chemistry-specific non-merge rules for salts, solvates, stereochemistry, classes,
   formulations, and formula-only matches;
 - fail-closed rejection of invented concept IDs and unsafe ambiguous decisions.
+- independent PubChem PUG REST, Wikidata/Wikipedia, and IATE authority clients;
+- exact-ID, canonical-URL, match-type, confidence, and review-state enrichment
+  contracts;
+- chemistry-aware Wikidata homonym rejection and Wikipedia sitelink retrieval;
+- IATE exact-term lookup with ambiguous-entry review safeguards;
+- controlled persistence of accepted external references as `concept_identifier`
+  rows;
+- `chemterm-enrich` coverage reports that retain source publication and family IDs.
 
 The LLM does not define the ontology. `concept_type` and `identifier_namespace` are
 the authoritative controlled vocabularies; `chemterm.seed` initializes them, and
@@ -845,6 +853,8 @@ Status: core parallel-text LLM path implemented; quality evaluation and non-LLM 
 Implemented components:
 
 - strict mapping relations for exact, contextual, broader, narrower, related, no-match, and ambiguous decisions;
+- orthogonal target-form statuses for translated, unchanged, language-neutral,
+  not-present, and unknown realizations;
 - one LLM call per English/target-language text pair;
 - direct use of existing parallel texts with an explicit prohibition on machine translation;
 - exact target-substring and character-offset validation;
@@ -853,6 +863,11 @@ Implemented components:
 - native-script support for Chinese, Japanese, Cyrillic, and other scripts;
 - per-language failure isolation and fail-closed issue reporting;
 - CLI support through `--pair-languages`.
+
+An unchanged surface form remains a target-language label when it is explicitly
+present in that language's patent text. The mapping is classified `UNCHANGED` and
+its accepted evidence carries the same status. `NOT_PRESENT` is distinct and must
+not create a target term.
 
 Exit gate: German/French terms are connected through concepts with traceable evidence and measured precision.
 

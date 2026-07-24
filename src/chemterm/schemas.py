@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from chemterm.contracts.input import TextOrigin
+from chemterm.contracts.mapping import TargetFormStatus
 
 
 class RecordStatus(StrEnum):
@@ -61,7 +62,17 @@ class TermEvidenceCreate(BaseModel):
     source_uri: HttpUrl | None = None
     evidence_excerpt: str | None = Field(default=None, max_length=5_000)
     text_origin: TextOrigin = TextOrigin.UNKNOWN
+    target_form_status: TargetFormStatus = TargetFormStatus.UNKNOWN
     confidence: float = Field(ge=0, le=1)
+
+    @field_validator("target_form_status")
+    @classmethod
+    def reject_absent_target_evidence(cls, value: TargetFormStatus) -> TargetFormStatus:
+        if value == TargetFormStatus.NOT_PRESENT:
+            raise ValueError(
+                "NOT_PRESENT cannot create term evidence because no target label exists"
+            )
+        return value
 
 
 class EvidenceSetCreate(BaseModel):

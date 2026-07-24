@@ -21,6 +21,16 @@ class MappingRelation(StrEnum):
     AMBIGUOUS = "AMBIGUOUS"
 
 
+class TargetFormStatus(StrEnum):
+    """How a target-language label realizes the English source form."""
+
+    TRANSLATED = "TRANSLATED"
+    UNCHANGED = "UNCHANGED"
+    LANGUAGE_NEUTRAL = "LANGUAGE_NEUTRAL"
+    NOT_PRESENT = "NOT_PRESENT"
+    UNKNOWN = "UNKNOWN"
+
+
 class RawTargetMapping(BaseModel):
     """Mapper output using offsets in normalized target text."""
 
@@ -31,6 +41,7 @@ class RawTargetMapping(BaseModel):
     target_start: int | None = Field(default=None, ge=0)
     target_end: int | None = Field(default=None, gt=0)
     relation: MappingRelation
+    target_form_status: TargetFormStatus = TargetFormStatus.UNKNOWN
     confidence: float = Field(ge=0, le=1)
     needs_review: bool = False
     reason_code: str = Field(min_length=1, max_length=120)
@@ -82,11 +93,21 @@ class TargetTermMapping(BaseModel):
     target_original_start: int | None = Field(default=None, ge=0)
     target_original_end: int | None = Field(default=None, gt=0)
     relation: MappingRelation
+    target_form_status: TargetFormStatus
     confidence: float = Field(ge=0, le=1)
     needs_review: bool
     mapper: str
     mapper_version: str
     reason_code: str
+
+    @model_validator(mode="after")
+    def validate_target_form_status(self) -> TargetTermMapping:
+        has_target = self.target_text is not None
+        if not has_target and self.target_form_status != TargetFormStatus.NOT_PRESENT:
+            raise ValueError("a mapping without target text must use NOT_PRESENT")
+        if has_target and self.target_form_status == TargetFormStatus.NOT_PRESENT:
+            raise ValueError("a grounded target label cannot use NOT_PRESENT")
+        return self
 
 
 class MappingIssue(BaseModel):

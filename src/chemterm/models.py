@@ -354,6 +354,10 @@ class TermEvidence(Base, TimestampMixin):
             "text_origin IN ('original', 'official_translation', 'machine_translation', 'unknown')",
             name="ck_term_evidence_text_origin",
         ),
+        CheckConstraint(
+            "target_form_status IN ('TRANSLATED', 'UNCHANGED', 'LANGUAGE_NEUTRAL', 'UNKNOWN')",
+            name="ck_term_evidence_target_form_status",
+        ),
         UniqueConstraint(
             "evidence_set_id",
             "term_id",
@@ -379,6 +383,9 @@ class TermEvidence(Base, TimestampMixin):
     evidence_excerpt: Mapped[str | None] = mapped_column(Text)
     text_origin: Mapped[str] = mapped_column(
         String(30), nullable=False, default="unknown", server_default="unknown"
+    )
+    target_form_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
     )
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
 

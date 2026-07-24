@@ -189,6 +189,10 @@ Multilingual pairing also groups the parallel title and abstract into one reques
 per target language. A mapped span is projected back to the exact target section
 and its section-local original offsets.
 
+Target labels are additionally classified as translated, unchanged, or
+language-neutral. An unchanged form is retained as a label in the target language;
+a missing target (`NOT_PRESENT`) does not create a label.
+
 Enable schema-constrained LLM refinement after configuring
 `CHEMTERM_LLM_API_KEY` and `CHEMTERM_LLM_MODEL`:
 
@@ -207,6 +211,20 @@ uv run chemterm-extract data/chemistry-patents-4-language-sample-preview.csv `
   --pair-languages de fr `
   --output reports/sample-multilingual-mappings.jsonl
 ```
+
+Find auditable external references for the unique refined English concepts:
+
+```powershell
+uv run chemterm-enrich reports/sample-multilingual-mappings.jsonl `
+  --source-csv data/chemistry-patents-4-language-sample-preview.csv `
+  --output reports/sample-external-references.jsonl
+```
+
+The report queries PubChem, Wikidata plus its English Wikipedia sitelink, and IATE.
+Each match includes the external ID, canonical URL, match type, confidence, and
+review flag. Source publication and patent-family identifiers are retained beside
+the matches. Only non-review matches are persisted by default when using
+`ExternalReferenceRepository`.
 
 Configuration is loaded from environment variables prefixed with `CHEMTERM_`. See `.env.example`.
 

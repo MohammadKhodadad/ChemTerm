@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import unicodedata
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from chemterm.contracts.extraction import TermCandidate
-from chemterm.contracts.mapping import MappingRelation, RawTargetMapping
+from chemterm.contracts.mapping import (
+    MappingRelation,
+    RawTargetMapping,
+    TargetFormStatus,
+)
 from chemterm.llm.client import StructuredLlmClient
 from chemterm.llm.grounding import ExactSpanError, ground_exact_span
 
@@ -29,6 +35,13 @@ Return exactly one decision per source_id:
 - NO_MATCH: no defensible target span exists.
 - AMBIGUOUS: multiple or uncertain interpretations; needs_review must be true.
 
+Also classify the target form:
+- TRANSLATED: the target uses a different language-specific surface form.
+- UNCHANGED: the source wording appears unchanged as a target-language label.
+- LANGUAGE_NEUTRAL: an inherently language-neutral formula, identifier, or notation is reused.
+- NOT_PRESENT: use only when no target span exists.
+- UNKNOWN: evidence is insufficient.
+
 Use NO_MATCH instead of inventing text. Use BROADER, NARROWER, or RELATED instead of attaching
 non-equivalent terminology to the same concept. Preserve Chinese, Japanese, Cyrillic, and all
 other native scripts. Source candidates and target text are provided directly; machine
@@ -50,6 +63,7 @@ class LlmPairDecision(BaseModel):
     target_start: int | None = Field(default=None, ge=0)
     target_end: int | None = Field(default=None, gt=0)
     relation: MappingRelation
+    target_form_status: TargetFormStatus = TargetFormStatus.UNKNOWN
     confidence: float = Field(ge=0, le=1)
     needs_review: bool = False
     reason_code: str = Field(min_length=1, max_length=120)
@@ -137,6 +151,7 @@ class LlmParallelTextMapper:
                         RawTargetMapping(
                             source_candidate_index=source_index,
                             relation=MappingRelation.NO_MATCH,
+                            target_form_status=TargetFormStatus.NOT_PRESENT,
                             confidence=0,
                             needs_review=True,
                             reason_code="UNGROUNDED_LLM_TARGET_REJECTED",
@@ -149,6 +164,11 @@ class LlmParallelTextMapper:
                 target_start=grounded_start,
                 target_end=grounded_end,
                 relation=decision.relation,
+                target_form_status=self._target_form_status(
+                    english_candidates[source_index].text,
+                    decision.target_text,
+                    decision.target_form_status,
+                ),
                 confidence=decision.confidence,
                 needs_review=decision.needs_review
                 or decision.relation
@@ -163,3 +183,19 @@ class LlmParallelTextMapper:
             results.append(raw_mapping)
 
         return tuple(sorted(results, key=lambda item: item.source_candidate_index))
+
+    @staticmethod
+    def _target_form_status(
+        source_text: str,
+        target_text: str | None,
+        proposed: TargetFormStatus,
+    ) -> TargetFormStatus:
+        if target_text is None:
+            return TargetFormStatus.NOT_PRESENT
+        source_key = " ".join(unicodedata.normalize("NFKC", source_text).casefold().split())
+        target_key = " ".join(unicodedata.normalize("NFKC", target_text).casefold().split())
+        if source_key == target_key:
+            if proposed == TargetFormStatus.LANGUAGE_NEUTRAL:
+                return proposed
+            return TargetFormStatus.UNCHANGED
+        return TargetFormStatus.TRANSLATED

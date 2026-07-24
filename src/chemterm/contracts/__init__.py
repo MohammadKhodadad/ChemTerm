@@ -20,6 +20,7 @@ from chemterm.contracts.mapping import (
     MappingRelation,
     MultilingualMappingResult,
     RawTargetMapping,
+    TargetFormStatus,
     TargetTermMapping,
 )
 
@@ -35,6 +36,7 @@ __all__ = [
     "PatentInput",
     "RawCandidate",
     "RawTargetMapping",
+    "TargetFormStatus",
     "TermCandidate",
     "TargetTermMapping",
     "TextOrigin",

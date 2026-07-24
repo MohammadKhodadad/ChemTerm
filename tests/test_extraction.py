@@ -4,6 +4,7 @@ from typing import Any
 
 from chemterm.contracts.extraction import CandidateType, ContextRole, RawCandidate
 from chemterm.contracts.input import PatentInput, TextUnit, TextUnitType
+from chemterm.contracts.mapping import TargetFormStatus
 from chemterm.extraction import (
     ChemDataExtractorNerExtractor,
     ChemUNerExtractor,
@@ -555,6 +556,43 @@ def test_parallel_pairing_maps_exact_native_language_spans() -> None:
     assert not result.issues
 
 
+def test_parallel_pairing_labels_unchanged_target_language_form() -> None:
+    record = PatentInput(
+        source_record_id="sample:unchanged-parallel",
+        publication_number="EP-5-A1",
+        text_units=(
+            TextUnit(language="en", text="Polymer matrix", unit_type=TextUnitType.TITLE),
+            TextUnit(language="de", text="Polymer matrix", unit_type=TextUnitType.TITLE),
+        ),
+    )
+    extraction = EnglishExtractionPipeline(extractors=(TechnicalPhraseExtractor(),)).extract(record)
+    client = RoutingFakeLlmClient(
+        {
+            "de": {
+                "mappings": [
+                    {
+                        "source_id": "E0",
+                        "target_text": "Polymer matrix",
+                        "target_start": 0,
+                        "target_end": 14,
+                        "relation": "EXACT_EQUIVALENT",
+                        "target_form_status": "UNCHANGED",
+                        "confidence": 0.98,
+                        "needs_review": False,
+                        "reason_code": "SOURCE_FORM_REUSED",
+                    }
+                ]
+            }
+        }
+    )
+
+    result = MultilingualPairingPipeline(LlmParallelTextMapper(client)).pair(record, extraction)
+
+    assert result.mappings[0].target_language == "de"
+    assert result.mappings[0].target_text == "Polymer matrix"
+    assert result.mappings[0].target_form_status == TargetFormStatus.UNCHANGED
+
+
 def test_parallel_pairing_fails_closed_on_invented_target_text() -> None:
     record = PatentInput(
         source_record_id="sample:invalid-parallel",
@@ -590,6 +628,7 @@ def test_parallel_pairing_fails_closed_on_invented_target_text() -> None:
     assert len(result.mappings) == 1
     assert result.mappings[0].relation.value == "NO_MATCH"
     assert result.mappings[0].target_text is None
+    assert result.mappings[0].target_form_status == TargetFormStatus.NOT_PRESENT
     assert result.mappings[0].needs_review
     assert result.issues == ()
 

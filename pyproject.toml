@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 chemterm-extract = "chemterm.extract_cli:main"
+chemterm-enrich = "chemterm.enrich_cli:main"
 
 [project.optional-dependencies]
 ner = [
