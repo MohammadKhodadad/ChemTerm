@@ -232,4 +232,5 @@ Configuration is loaded from environment variables prefixed with `CHEMTERM_`. Se
 
 - `docs/PLAN.md` — project architecture and roadmap
 - `docs/SCHEMA.md` — terminology schema and English extraction design
+- `docs/DATABASE_SETUP.md` — database provisioning, migrations, seeding, operations, and backups
 - `docs/deep-research-terms.md` — supporting research
